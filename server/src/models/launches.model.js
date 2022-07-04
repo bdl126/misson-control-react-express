@@ -1,26 +1,83 @@
+const axios = require("axios")
 const launchesDataBase = require('./launches.mongo')
 const planets = require('./planets.mongo')
 
 const  DEFAULT_FLIGH_NUMBER = 100
 
-const launch = {
-    flightNumber:100,
-    mission: 'kepler exploratiomx ',
-    rocket: "explorer IS1",
-    launchDate: new Date(),
-    target: "Kepler-442 b",
-    customers: ['NASA', "ZTM"],
-    upcoming: true,
-    success: true
+const SPACEX_API_URL = "https://api.spacexdata.com/v4/launches/query"
+
+async function populateLaunch() {
+    console.log("getting space x data");
+    const response = await axios.post(SPACEX_API_URL,
+    {
+        query : {},
+        options: {
+            pagination: false,
+            populate:[
+                {
+                    path : 'rocket',
+                    select : {
+                        name : 1
+                    }
+                },
+                {
+                    path : "payloads",
+                    select : {
+                        customers : 1
+                    }
+                }
+            ]
+        }
+    })
+
+    if (response.status !== 200) {
+        throw new Error('launch data download failed')
+    }
+
+    const launchDocs = response.data.docs
+    for( const launchDoc of launchDocs) {
+        const payloads = launchDoc.payloads
+        const customers = payloads.flatMap((payload)=>{
+            return payload.customers
+        })
+
+        const launch = {
+            flightNumber : launchDoc.flight_number,
+            mission : launchDoc.name,
+            rocket : launchDoc.rocket.name,
+            launchDate : launchDoc.date_local,
+            upcoming : launchDoc.upcoming,
+            success : launchDoc.success,
+            customers : customers
+        }
+        console.log(`${launch.flightNumber} ${launch.mission}`);
+        saveLaunch(launch)
+    }
 }
 
-saveLaunch(launch)
 
+async function loadLaunchData() {
+
+    const firstLaunch = await findLaunch({
+        flightNumber: 1,
+        rocket: 'Falcon 1',
+        mission: 'FalconSat'
+    })
+
+    if(firstLaunch) {
+        console.log("Launches already loaded!");
+    } else {
+        await populateLaunch()
+    }
+
+}
+
+async function findLaunch(filter) {
+    return await launchesDataBase.findOne(filter);
+}
 
 async function existLaunchWIthId(launchId) {
-    return await launchesDataBase.findOne({
-        flightNumber: launchId
-    })
+    return await findLaunch( {flightNumber: launchId} )
 }
 
 async function getLatestFlightNumber() {
@@ -36,13 +93,28 @@ async function getLatestFlightNumber() {
 }
 
 
-async function getAllLaunches() {
+async function getAllLaunches(skip, limit) {
     return await launchesDataBase.find({}, {
         '_id':0, '__v':0
     })
+    .sort('flightNumber')
+    .skip(skip)
+    .limit(limit)
 }
 
 async function saveLaunch(launch) {
+
+    await launchesDataBase.findOneAndUpdate({
+        flightNumber: launch.flightNumber,
+    }, launch, {
+        upsert : true
+    })
+
+}
+
+async function scheduleNewLaunch(launch) {
+    const newFlightNumber = await getLatestFlightNumber() + 1
+
     const planet = await planets.findOne({
         keplerName:launch.target,
     })
@@ -51,21 +123,6 @@ async function saveLaunch(launch) {
         throw new Error('No matching planet found')
     }
 
-    await launchesDataBase.findOneAndUpdate({
-        flightNumber: launch.flightNumber,
-    }, launch, {
-        upsert : true
-    })
-    const x = await launchesDataBase.find({}, {
-        '_id':0, '__v':0
-    })
-
-}
-
-async function scheduleNewLaunch(launch) {
-    const newFlightNumber = await getLatestFlightNumber() + 1
-
-
 
     const newLaunch = Object.assign(launch, {
         success: true,
@@ -73,7 +130,8 @@ async function scheduleNewLaunch(launch) {
         customer:  ['NASA', "ZTM"],
         flightNumber : newFlightNumber,
         ...launch,
-     })
+    })
+
 
     await saveLaunch(newLaunch);
     return launch
@@ -90,16 +148,12 @@ async function abortLaunchById(launchId) {
     })
 
     return aborted.modifiedCount === 1
-    // const aborted = launches.get(launchId)
-    // console.log(aborted);
-    // aborted.upcoming = false;
-    // aborted.success = false;
-    // return aborted
 }
 
 module.exports= {
     existLaunchWIthId,
     getAllLaunches,
     scheduleNewLaunch,
-    abortLaunchById
+    abortLaunchById,
+    loadLaunchData
 }
