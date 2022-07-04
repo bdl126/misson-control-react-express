@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { 
+import {
   withStyles,
   Appear,
   Link,
@@ -18,7 +18,7 @@ const styles = () => ({
 });
 
 const Upcoming = props => {
-  const { 
+  const {
     entered,
     launches,
     classes,
@@ -28,6 +28,7 @@ const Upcoming = props => {
   const tableBody = useMemo(() => {
     return launches?.filter((launch) => launch.upcoming)
       .map((launch) => {
+        console.log(launch.launchDate);
         return <tr key={String(launch.flightNumber)}>
           <td>
             <Clickable style={{color:"red"}}>
